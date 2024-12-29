@@ -1,43 +1,5 @@
 import torch
-def rope_spherical(x, positions, base=10000.0):
-    '''
-    applies spherical positional encoding to the input tensor, x, given the 2d coordinates from positions
-    inputs:
-    x, shaped (batches, heads, tokens, channels) or just (batches, tokens, channels)
-    positions, shaped (batches, heads, tokens, 2), or just (tokens, 2). the last dim contains the 2d position values of the tokens
-    use the following rotation matrix with 2 angles, taken from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu:
-    [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
-    [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
-    [0, sin(ϕ), cos(ϕ)]]
-    '''
-    C = x.shape[-1]
-    assert C%3==0
-    x_pos = positions[...,:1] #(...,1)
-    y_pos = positions[...,1:] #(...,1)
 
-    freq_range = torch.arange(C // 3, device=x.device, dtype=torch.float32)  # indices [0..(C/3 - 1)]
-    alpha = base ** (-3.0 * freq_range / C)  # shape (C/3,)
-    theta = x_pos * alpha #shape (...,C/3)
-    phi = y_pos * alpha #shape (...,C/3)
-    cos_theta = torch.cos(theta)
-    sin_theta = torch.sin(theta)
-    cos_phi = torch.cos(phi)
-    sin_phi = torch.sin(phi)
-
-    dim_sizes = list(x.shape) + [3]
-    dim_sizes[-2] = C//3
-    feats_3d = x.view(dim_sizes)
-    x0 = feats_3d[...,0]
-    x1 = feats_3d[...,1]
-    x2 = feats_3d[...,2]
-    x0_rot = cos_theta * x0 - cos_phi * sin_theta* x1 + sin_phi*sin_theta *x2
-    x1_rot = sin_theta * x0 + cos_phi * cos_theta * x1 - sin_phi*cos_theta * x2
-    x2_rot = sin_phi*x1 + cos_phi*x2
-
-    rotated_feats = torch.stack([x0_rot, x1_rot,x2_rot], dim=-1)  # (..., C/3, 3)
-    x = rotated_feats.view(x.shape)  #back to original x shape
-
-    return x
 def rope_spherical_for_images(x, base=10000.0):
     '''
     applies spherical positional encoding to an image tensor
@@ -84,6 +46,46 @@ def rope_spherical_for_images(x, base=10000.0):
     x2_rot = sin_phi * x1 + cos_phi * x2
     rotated_feats = torch.stack([x0_rot, x1_rot, x2_rot], dim=-1)  # (..., C/3, 3)
     x = rotated_feats.view(dim_sizes) #original x shape
+    return x
+
+def rope_spherical(x, positions, base=10000.0):
+    '''
+    applies spherical positional encoding to the input tensor, x, given the 2d coordinates from positions
+    inputs:
+    x, shaped (batches, heads, tokens, channels) or just (batches, tokens, channels)
+    positions, shaped (batches, heads, tokens, 2), or just (tokens, 2). the last dim contains the 2d position values of the tokens
+    use the following rotation matrix with 2 angles, taken from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu:
+    [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
+    [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
+    [0, sin(ϕ), cos(ϕ)]]
+    '''
+    C = x.shape[-1]
+    assert C%3==0
+    x_pos = positions[...,:1] #(...,1)
+    y_pos = positions[...,1:] #(...,1)
+
+    freq_range = torch.arange(C // 3, device=x.device, dtype=torch.float32)  # indices [0..(C/3 - 1)]
+    alpha = base ** (-3.0 * freq_range / C)  # shape (C/3,)
+    theta = x_pos * alpha #shape (...,C/3)
+    phi = y_pos * alpha #shape (...,C/3)
+    cos_theta = torch.cos(theta)
+    sin_theta = torch.sin(theta)
+    cos_phi = torch.cos(phi)
+    sin_phi = torch.sin(phi)
+
+    dim_sizes = list(x.shape) + [3]
+    dim_sizes[-2] = C//3
+    feats_3d = x.view(dim_sizes)
+    x0 = feats_3d[...,0]
+    x1 = feats_3d[...,1]
+    x2 = feats_3d[...,2]
+    x0_rot = cos_theta * x0 - cos_phi * sin_theta* x1 + sin_phi*sin_theta *x2
+    x1_rot = sin_theta * x0 + cos_phi * cos_theta * x1 - sin_phi*cos_theta * x2
+    x2_rot = sin_phi*x1 + cos_phi*x2
+
+    rotated_feats = torch.stack([x0_rot, x1_rot,x2_rot], dim=-1)  # (..., C/3, 3)
+    x = rotated_feats.view(x.shape)  #back to original x shape
+
     return x
 
 if __name__=='__main__':
