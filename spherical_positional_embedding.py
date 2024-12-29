@@ -1,5 +1,42 @@
 import torch
+def rope_spherical(x, positions, base=10000.0):
+    '''
+    inputs:
+    x, shaped (batches, heads, tokens, channels) or just (batches, tokens, channels)
+    positions, shaped (batches, heads, tokens, 2), or just (tokens, 2). the last dim contains the x and y positions of the tokens
+    use the following rotation matrix with 2 angles, taken from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu:
+    [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
+    [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
+    [0, sin(ϕ), cos(ϕ)]]
+    '''
+    C = x.shape[-1]
+    assert C%3==0
+    x_pos = positions[...,:1] #(...,1)
+    y_pos = positions[...,1:] #(...,1)
 
+    freq_range = torch.arange(C // 3, device=x.device, dtype=torch.float32)  # indices [0..(C/3 - 1)]
+    alpha = base ** (-3.0 * freq_range / C)  # shape (C/3,)
+    theta = x_pos * alpha #shape (...,C/3)
+    phi = y_pos * alpha #shape (...,C/3)
+    cos_theta = torch.cos(theta)
+    sin_theta = torch.sin(theta)
+    cos_phi = torch.cos(phi)
+    sin_phi = torch.sin(phi)
+
+    dim_sizes = list(x.shape) + [3]
+    dim_sizes[-2] = C//3
+    feats_3d = x.view(dim_sizes)
+    x0 = feats_3d[...,0]
+    x1 = feats_3d[...,1]
+    x2 = feats_3d[...,2]
+    x0_rot = cos_theta * x0 - cos_phi * sin_theta* x1 + sin_phi*sin_theta *x2
+    x1_rot = sin_theta * x0 + cos_phi * cos_theta * x1 - sin_phi*cos_theta * x2
+    x2_rot = sin_phi*x1 + cos_phi*x2
+
+    rotated_feats = torch.stack([x0_rot, x1_rot,x2_rot], dim=-1)  # (..., C/3, 3)
+    rotated_feats = rotated_feats.view(x.shape)  #back to original x shape
+
+    return rotated_feats
 def rope_spherical_for_images(x, base=10000.0):
     '''
     inputs:
@@ -48,12 +85,26 @@ def rope_spherical_for_images(x, base=10000.0):
     return rotated_feats
 
 if __name__=='__main__':
-    x=torch.randn((1,2,4,4,18))
-    x_flattened=x.reshape(-1,x.shape[-1])
-    x_norms_before=torch.sqrt(torch.sum(x_flattened**2,dim=-1))
-    print(x_norms_before)
+    x = torch.randn((2, 2, 10, 18))
+    pos = torch.randn((10, 2)) ** 2
 
-    y=rope_spherical_for_images(x)
-    x_flattened2=x.reshape(-1,x.shape[-1])
-    x_norms_after=torch.sqrt(torch.sum(x_flattened**2,dim=-1))
-    print(x_norms_after)
+    xflat0 = x.reshape(-1, x.shape[-1])
+    x_norms0 = torch.sqrt(torch.sum(xflat0**2, dim=-1))
+    print(x_norms0)
+
+    x = rope_spherical(x, pos)
+
+    xflat1 = x.reshape(-1, x.shape[-1])
+    x_norms1 = torch.sqrt(torch.sum(xflat1**2, dim=-1))
+    print(x_norms1)
+
+    print('\n for images')
+
+    x=torch.randn((2,2,4,4,18))
+    x_flat0=x.reshape(-1,x.shape[-1])
+    x_norms0 = torch.sqrt(torch.sum(x_flat0**2, dim=-1))
+    print(x_norms0)
+    x = rope_spherical_for_images(x)
+    xflat1 = x.reshape(-1, x.shape[-1])
+    x_norms1 = torch.sqrt(torch.sum(xflat1**2, dim=-1))
+    print(x_norms1)
