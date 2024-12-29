@@ -19,13 +19,12 @@ def rope_spherical_for_images(x, base=10000.0):
 
     rows_pos = torch.arange(rows,device=x.device,dtype=torch.float32) #shape (rows,)
     cols_pos = torch.arange(cols,device=x.device,dtype=torch.float32) #shape (cols,)
-    grid_y, grid_x = torch.meshgrid(rows_pos, cols_pos, indexing='ij')  # Ensure 'ij' indexing
+    grid_y, grid_x = torch.meshgrid(rows_pos, cols_pos, indexing='ij')
     coords = torch.stack([grid_y, grid_x], dim=-1)  # Shape: (rows, cols, 2)
     coords = coords.reshape(-1, 2) #shape (rows*cols,2)
     rows_pos = coords[:,:-1] #shape (rows*cols,1)
     cols_pos = coords[:,-1:] #shape (rows*cols,1)
 
-    
     freq_range = torch.arange(C // 3, device=x.device, dtype=torch.float32)  # indices [0..(C/3 - 1)]
     alpha = base ** (-3.0 * freq_range / C)  # shape (C/3,)
     theta = cols_pos * alpha  # shape (rows*cols,C/3)
@@ -34,7 +33,6 @@ def rope_spherical_for_images(x, base=10000.0):
     sin_theta = torch.sin(theta)
     cos_phi = torch.cos(phi)
     sin_phi = torch.sin(phi)
-
     
     x = x.view(flattened_dim_sizes) #shape (..., rows*cols, C)
     feats_3d = x.view(expanded_dim_sizes) #shaped (..., rows*cols, C//3, 3)
@@ -42,12 +40,9 @@ def rope_spherical_for_images(x, base=10000.0):
     x0 = feats_3d[..., 0]
     x1 = feats_3d[..., 1]
     x2 = feats_3d[..., 2]
-
     x0_rot = cos_theta * x0 - cos_phi * sin_theta * x1 + sin_phi * sin_theta * x2
     x1_rot = sin_theta * x0 + cos_phi * cos_theta * x1 - sin_phi * cos_theta * x2
     x2_rot = sin_phi * x1 + cos_phi * x2
-
-    # Reshape back
     rotated_feats = torch.stack([x0_rot, x1_rot, x2_rot], dim=-1)  # (..., C/3, 3)
     rotated_feats = rotated_feats.view(dim_sizes) #original x shape
     return rotated_feats
