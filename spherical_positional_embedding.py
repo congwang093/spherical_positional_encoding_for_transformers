@@ -4,7 +4,7 @@ def rope_spherical(x, positions, base=10000.0):
     applies spherical positional encoding to the input tensor, x, given the 2d coordinates from positions
     inputs:
     x, shaped (batches, heads, tokens, channels) or just (batches, tokens, channels)
-    positions, shaped (batches, heads, tokens, 2), or just (tokens, 2). the last dim contains the 2d position information of the tokens
+    positions, shaped (batches, heads, tokens, 2), or just (tokens, 2). the last dim contains the 2d position values of the tokens
     use the following rotation matrix with 2 angles, taken from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu:
     [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
     [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
