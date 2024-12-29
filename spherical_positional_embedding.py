@@ -1,6 +1,7 @@
 import torch
 def rope_spherical(x, positions, base=10000.0):
     '''
+    applies spherical positional encoding to the input tensor, x, given the 2d coordinates from positions
     inputs:
     x, shaped (batches, heads, tokens, channels) or just (batches, tokens, channels)
     positions, shaped (batches, heads, tokens, 2), or just (tokens, 2). the last dim contains the x and y positions of the tokens
@@ -34,11 +35,12 @@ def rope_spherical(x, positions, base=10000.0):
     x2_rot = sin_phi*x1 + cos_phi*x2
 
     rotated_feats = torch.stack([x0_rot, x1_rot,x2_rot], dim=-1)  # (..., C/3, 3)
-    rotated_feats = rotated_feats.view(x.shape)  #back to original x shape
+    x = rotated_feats.view(x.shape)  #back to original x shape
 
-    return rotated_feats
+    return x
 def rope_spherical_for_images(x, base=10000.0):
     '''
+    applies spherical positional encoding to an image tensor
     inputs:
     x, shaped (batches, heads, rows, cols, channels) or just (batches, rows, cols, channels)
     use the following rotation matrix with 2 angles, taken from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu:
@@ -81,8 +83,8 @@ def rope_spherical_for_images(x, base=10000.0):
     x1_rot = sin_theta * x0 + cos_phi * cos_theta * x1 - sin_phi * cos_theta * x2
     x2_rot = sin_phi * x1 + cos_phi * x2
     rotated_feats = torch.stack([x0_rot, x1_rot, x2_rot], dim=-1)  # (..., C/3, 3)
-    rotated_feats = rotated_feats.view(dim_sizes) #original x shape
-    return rotated_feats
+    x = rotated_feats.view(dim_sizes) #original x shape
+    return x
 
 if __name__=='__main__':
     x = torch.randn((2, 2, 10, 18))
