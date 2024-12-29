@@ -3,13 +3,11 @@ import torch
 def rope_spherical_for_images(x, base=10000.0):
     '''
     inputs:
-    x, shaped (B batches, H heads, rows, cols, C channels) or (B, rows, cols, C)
-
-    we gonna do the following rotation matrix to groups of 3 channel elements in each token
+    x, shaped (B batches, H heads, rows, cols, C channels) or just (B, rows, cols, C)
+    we gonna use the following rotation matrix with 2 angles. this was from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu
     [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
     [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
     [0, sin(ϕ), cos(ϕ)]]
-    this was from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu
     '''
     rows, cols, C = x.shape[-3:]
     assert C % 3 == 0
