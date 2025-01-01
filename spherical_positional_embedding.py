@@ -54,7 +54,7 @@ class Rope_Spherical(nn.Module):
         B,H,N,C=x.shape
         x=x.view(B, H, N, C//3, 3).unsqueeze(4) #B, H, N, C//3, 1, 3
         x = torch.sum(x*self.w,dim=-1) #(B, H, N, C//3, 1, 3) & (N, C//3, 3, 3) - > (B, H, N, C//3, 3)
-        x=x.reshape(B,H,N,C) #(B, H, 3, N, C//3) - > (B,H,N,C)
+        x=x.reshape(B,H,N,C) #(B, H, N, C//3, 3) - > (B,H,N,C)
         return x
 
 if __name__ == "__main__":
