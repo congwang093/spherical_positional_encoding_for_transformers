@@ -1,114 +1,69 @@
 import torch
+import torch.nn as nn
 
-def rope_spherical_for_images(x, base=10000.0):
-    '''
-    applies spherical positional encoding to an image tensor
-    inputs:
-    x, shaped (batches, heads, rows, cols, channels) or just (batches, rows, cols, channels)
-    use the following rotation matrix with 2 angles, taken from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu:
-    [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
-    [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
-    [0, sin(ϕ), cos(ϕ)]]
-    '''
-    rows, cols, C = x.shape[-3:]
-    assert C % 3 == 0
-
-    dim_sizes=list(x.shape)
-    flattened_dim_sizes = dim_sizes[:-3] + [dim_sizes[-3]*dim_sizes[-2]] + [dim_sizes[-1]] #..., rows*cols, C
-    expanded_dim_sizes = flattened_dim_sizes+[3]
-    expanded_dim_sizes[-2]=C//3 #...rows, cols, C//3, C
-
-    rows_pos = torch.arange(rows,device=x.device,dtype=torch.float32) #shape (rows,)
-    cols_pos = torch.arange(cols,device=x.device,dtype=torch.float32) #shape (cols,)
-    grid_y, grid_x = torch.meshgrid(rows_pos, cols_pos, indexing='ij')
-    coords = torch.stack([grid_y, grid_x], dim=-1)  # Shape: (rows, cols, 2)
-    coords = coords.reshape(-1, 2) #shape (rows*cols,2)
-    rows_pos = coords[:,:-1] #shape (rows*cols,1)
-    cols_pos = coords[:,-1:] #shape (rows*cols,1)
-
-    freq_range = torch.arange(C // 3, device=x.device, dtype=torch.float32)  # indices [0..(C/3 - 1)]
-    alpha = base ** (-3.0 * freq_range / C)  # shape (C/3,)
-    theta = cols_pos * alpha  # shape (rows*cols,C/3)
-    phi = rows_pos * alpha  # shape (rows*cols,C/3)
-    cos_theta = torch.cos(theta)
-    sin_theta = torch.sin(theta)
-    cos_phi = torch.cos(phi)
-    sin_phi = torch.sin(phi)
+class Rope_Spherical(nn.Module):
+    '''applies this rotation matrix to Query or Key tensors for self attention
+            [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
+            [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
+            [0, sin(ϕ), cos(ϕ)]]'''
     
-    x = x.view(flattened_dim_sizes) #shape (..., rows*cols, C)
-    feats_3d = x.view(expanded_dim_sizes) #shaped (..., rows*cols, C//3, 3)
-    #each these 3 below is shaped (...,rows*cols, C//3)
-    x0 = feats_3d[..., 0]
-    x1 = feats_3d[..., 1]
-    x2 = feats_3d[..., 2]
-    x0_rot = cos_theta * x0 - cos_phi * sin_theta * x1 + sin_phi * sin_theta * x2
-    x1_rot = sin_theta * x0 + cos_phi * cos_theta * x1 - sin_phi * cos_theta * x2
-    x2_rot = sin_phi * x1 + cos_phi * x2
-    rotated_feats = torch.stack([x0_rot, x1_rot, x2_rot], dim=-1)  # (..., C/3, 3)
-    x = rotated_feats.view(dim_sizes) #original x shape
-    return x
+    def __init__(self,dim, rows=32,cols=32, positions=None):
+        super(Rope_Spherical, self).__init__()
+        assert dim % 3 == 0
 
-def rope_spherical(x, positions, base=10000.0):
-    '''
-    applies spherical positional encoding to the input tensor, x, given the 2d coordinates from positions
-    inputs:
-    x, shaped (batches, heads, tokens, channels) or just (batches, tokens, channels)
-    positions, shaped (batches, heads, tokens, 2), or just (tokens, 2). the last dim contains the 2d position values of the tokens
-    use the following rotation matrix with 2 angles, taken from SPHERICAL POSITION ENCODING FOR TRANSFORMERS (Oct 4 2023) by Eren Unlu:
-    [[cos(θ), −cos(ϕ)sin(θ), sin(ϕ)sin(θ)],
-    [sin(θ), cos(ϕ)cos(θ), −sin(ϕ)cos(θ)],
-    [0, sin(ϕ), cos(ϕ)]]
-    '''
-    C = x.shape[-1]
-    assert C%3==0
-    x_pos = positions[...,:1] #(...,1)
-    y_pos = positions[...,1:] #(...,1)
+        if type(positions)==type(None):
+            positions=self.generate_positions(rows,cols)
 
-    freq_range = torch.arange(C // 3, device=x.device, dtype=torch.float32)  # indices [0..(C/3 - 1)]
-    alpha = base ** (-3.0 * freq_range / C)  # shape (C/3,)
-    theta = x_pos * alpha #shape (...,C/3)
-    phi = y_pos * alpha #shape (...,C/3)
-    cos_theta = torch.cos(theta)
-    sin_theta = torch.sin(theta)
-    cos_phi = torch.cos(phi)
-    sin_phi = torch.sin(phi)
+        x_pos = positions[..., :1]  # (...,N,1)
+        y_pos = positions[..., 1:]  # (...,N,1)
+        freq_range = torch.arange(dim // 3, dtype=torch.float32)
+        alpha = 10000 ** (-3.0 * freq_range / dim)  # shape (C/3,)
+        # shape (...N,C/3) for these below
+        theta = x_pos * alpha
+        phi = y_pos * alpha
+        cos_theta = torch.cos(theta)
+        sin_theta = torch.sin(theta)
+        cos_phi = torch.cos(phi)
+        sin_phi = torch.sin(phi)
+        
+        w = torch.zeros((3,3,positions.shape[0],dim//3))
+        w[0,0,:,:]=cos_theta
+        w[0,1,:,:]=-cos_phi*sin_theta
+        w[0,2,:,:]=sin_phi*sin_theta
 
-    dim_sizes = list(x.shape) + [3]
-    dim_sizes[-2] = C//3
-    feats_3d = x.view(dim_sizes)
-    x0 = feats_3d[...,0]
-    x1 = feats_3d[...,1]
-    x2 = feats_3d[...,2]
-    x0_rot = cos_theta * x0 - cos_phi * sin_theta* x1 + sin_phi*sin_theta *x2
-    x1_rot = sin_theta * x0 + cos_phi * cos_theta * x1 - sin_phi*cos_theta * x2
-    x2_rot = sin_phi*x1 + cos_phi*x2
+        w[1,0,:,:]=sin_theta
+        w[1,1,:,:]=cos_phi*cos_theta
+        w[1,2,:,:]=-sin_phi*cos_theta
 
-    rotated_feats = torch.stack([x0_rot, x1_rot,x2_rot], dim=-1)  # (..., C/3, 3)
-    x = rotated_feats.view(x.shape)  #back to original x shape
+        w[2,1,:,:]=sin_phi
+        w[2,2,:,:]=cos_phi
+        self.dim=dim
+        self.register_buffer('w',w.permute(2,3,0,1)) #(N, dim//3, 3, 3)
 
-    return x
+    @staticmethod
+    def generate_positions(rows, cols):
+        rows_pos = torch.arange(rows, dtype=torch.float32)  #(rows,)
+        cols_pos = torch.arange(cols, dtype=torch.float32)  #(cols,)
+        grid_y, grid_x = torch.meshgrid(rows_pos, cols_pos, indexing='ij')
+        coords = torch.stack([grid_y, grid_x], dim=-1)  #(rows, cols, 2)
+        positions = coords.reshape(-1, 2)  # shape (rows*cols,2)
+        return positions
 
-if __name__=='__main__':
-    x = torch.randn((2, 2, 10, 18))
-    pos = torch.randn((10, 2)) ** 2
+    def forward(self,x):
+        '''x should be a shape of (B batches, H heads, N tokens, C channels), returns same shape'''
+        B,H,N,C=x.shape
+        x=x.view(B, H, N, C//3, 3).unsqueeze(4) #B, H, N, C//3, 1, 3
+        x = torch.sum(x*self.w,dim=-1) #(B, H, N, C//3, 1, 3) & (N, C//3, 3, 3) - > (B, H, N, C//3, 3)
+        x=x.reshape(B,H,N,C) #(B, H, 3, N, C//3) - > (B,H,N,C)
+        return x
 
-    xflat0 = x.reshape(-1, x.shape[-1])
-    x_norms0 = torch.sqrt(torch.sum(xflat0**2, dim=-1))
-    print(x_norms0)
+if __name__ == "__main__":
+    Q = torch.randn((2, 2, 100, 30))  #flattened image tensor (Batches,Heads,N_total_tokens,Channels)
+    qnorm = torch.sqrt(torch.sum(Q ** 2, dim=-1))
 
-    x = rope_spherical(x, pos)
+    rope_spherical = Rope_Spherical(Q.shape[-1], rows=10, cols=10)
+    Q = rope_spherical(Q)
+    qnorm2 = torch.sqrt(torch.sum(Q ** 2, dim=-1))
 
-    xflat1 = x.reshape(-1, x.shape[-1])
-    x_norms1 = torch.sqrt(torch.sum(xflat1**2, dim=-1))
-    print(x_norms1)
-
-    print('\n for images')
-
-    x=torch.randn((2,2,4,4,18))
-    x_flat0=x.reshape(-1,x.shape[-1])
-    x_norms0 = torch.sqrt(torch.sum(x_flat0**2, dim=-1))
-    print(x_norms0)
-    x = rope_spherical_for_images(x)
-    xflat1 = x.reshape(-1, x.shape[-1])
-    x_norms1 = torch.sqrt(torch.sum(xflat1**2, dim=-1))
-    print(x_norms1)
+    are_close = torch.allclose(qnorm, qnorm2, atol=1e-7)
+    print(are_close)  # True
